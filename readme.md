@@ -290,5 +290,158 @@ $ code ./
 
 #### 所有权
 
+> 所有权规则：
+>
+> 1. Rust 中的每一个值都有一个被称为其 **所有者**（*owner*）的变量。
+> 2. 值在任一时刻有且只有一个所有者。
+> 3. 当所有者（变量）离开作用域，这个值将被丢弃。
 
+以下代码不可以运行
+
+```rust
+fn main() {
+    let mut s1 = String::from("hello");
+    let s2 = s1; 	//已经将s1的堆上数据移动给了s2，s1失效
+    println!("{}", s1);  //发生错误
+}
+```
+
+如果要把复制堆上面的数据，可以用clone函数：`let s2 = s1.clone();`
+
+> 如果数据仅仅在栈上，就不用考虑是移动还是拷贝了
+
+```rust
+fn main() {
+    let s = String::from("hello");  // s 进入作用域
+    takes_ownership(s);             // s 的值移动到函数里 ...
+                                    // ... 所以到这里不再有效
+    let x = 5;                      // x 进入作用域
+    makes_copy(x);                  // x 应该移动函数里，
+                                    // 但 i32 是 Copy 的，
+                                    // 所以在后面可继续使用 x
+
+} // 这里, x 先移出了作用域，然后是 s。但因为 s 的值已被移走，
+  // 没有特殊之处
+
+fn takes_ownership(some_string: String) { // some_string 进入作用域
+    println!("{}", some_string);
+} // 这里，some_string 移出作用域并调用 drop方法。
+  // 占用的内存被释放
+
+fn makes_copy(some_integer: i32) { // some_integer 进入作用域
+    println!("{}", some_integer);
+} // 这里，some_integer 移出作用域。没有特殊之处
+```
+
+Rust 有一个叫做 `Copy` trait 的特殊注解，可以用在类似整型这样的存储在栈上的类型上。如果一个类型实现了 `Copy` trait，那么一个旧的变量在将其赋值给其他变量后仍然可用。Rust 不允许自身或其任何部分实现了 `Drop` trait 的类型使用 `Copy` trait。
+
+```rust
+fn main() {
+    let s1 = gives_ownership();         // gives_ownership 将返回值
+                                        // 转移给 s1
+    let s2 = String::from("hello");     // s2 进入作用域
+    let s3 = takes_and_gives_back(s2);  // s2 被移动到
+                                        // takes_and_gives_back 中,
+                                        // 它也将返回值移给 s3
+} // 这里, s3 移出作用域并被丢弃。s2 也移出作用域，但已被移走，
+  // 所以什么也不会发生。s1 离开作用域并被丢弃
+
+fn gives_ownership() -> String {             // gives_ownership 会将
+                                             // 返回值移动给
+                                             // 调用它的函数
+    let some_string = String::from("yours"); // some_string 进入作用域.
+    some_string                              // 返回 some_string 
+                                             // 并移出给调用的函数
+}
+
+// takes_and_gives_back 将传入字符串并返回该值
+fn takes_and_gives_back(a_string: String) -> String { // a_string 进入作用域
+    a_string  // 返回 a_string 并移出给调用的函数
+}
+```
+
+为了不至于出现总是将一个变量传入函数后改变所有权，导致函数结束后原来的变量不再可用，Rust使用了引用的方法。
+
+```rust
+fn main() {
+    let s1 = String::from("hello");
+
+    let len = calculate_length(&s1);
+
+    println!("The length of '{}' is {}.", s1, len);
+}
+
+fn calculate_length(s: &String) -> usize {	//s是String类型变量的引用
+    s.len()
+} // 这里，s 离开了作用域。但因为它并不拥有引用值的所有权，
+  // 所以什么也不会发生
+```
+
+:warning: Rust中的引用不同于C++中的引用，默认其不允许修改引用的值。如果想要使得引用的值可用改变，需要在函数参数中添加mut。
+
+```rust
+fn main() {
+    let mut s = String::from("hello");
+    //change(&s);
+    change(&mut s);
+}
+
+//fn change(some_string: &String) {
+fn change(some_string: &mut String) {
+    some_string.push_str(", world");
+}
+```
+
+> 可变引用有一个很大的限制：在同一时间只能有一个对某一特定数据的可变引用。
+>
+> 这是因为Rust会避免**数据竞争**的发生，不会编译存在数据竞争的代码！
+>
+> 下面是同一作用域中两类引用的共存情况。
+
+|            | 不可变引用 | 可变引用 |
+| :--------: | :--------: | :------: |
+| 不可变引用 |   可共存   | 不可共存 |
+|  可变引用  |  不可共存  | 不可共存 |
+
+:warning:Rust中不存在无效的引用（类似于C中的悬垂指针），下列代码不能编译成功
+
+```rust
+fn main() {
+    let reference_to_nothing = dangle();
+}
+
+fn dangle() -> &String { // dangle 返回一个字符串的引用
+
+    let s = String::from("hello"); // s 是一个新字符串
+
+    &s // 返回字符串 s 的引用
+} // 这里 s 离开作用域并被丢弃。其内存被释放。
+  // 危险！编译器报错！
+```
+
+```rust
+//获取字符串第一个单词
+fn first_word(s: &String) -> &str {
+    let bytes = s.as_bytes();
+
+    for (i, &item) in bytes.iter().enumerate() {
+        if item == b' ' {
+            return &s[0..i];
+        }
+    }
+
+    &s[..]
+}
+
+fn main() {
+    let mut s = String::from("hello world");
+    let word = first_word(&s);
+    //下面的语句出错
+    //因为这里的word是slice类型，属于s的不可变引用，所以不能再出现s的可变引用。
+    let a = &mut s;
+    println!("the first word is: {}", word);
+}
+```
+
+字符串字面值就是 slice，例如`let s = "Hello, world!";`这里的s的类型就是`&str`:它是一个指向二进制程序特定位置的 slice。这也就是为什么字符串字面值是不可变的；`&str` 是一个不可变引用。
 
